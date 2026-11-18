@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <script src="plugin/index.js"></script>
+  <script src="plugin/seams.js"></script>
+  <style>
+    body {
+      margin: 0;
+      color: white;
+      background: #1e1e1e;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #logPanel {
+      flex: none;
+      max-height: 160px;
+      overflow-y: auto;
+      padding: 8px 10px;
+      font-size: 10px;
+      font-family: ui-monospace, Consolas, monospace;
+      color: #9ad1a0;
+      background: #0e0e0e;
+      border-bottom: 1px solid #333;
+      white-space: pre-wrap;
+      word-break: break-all;
+      user-select: text;
+      -webkit-user-select: text;
+      cursor: text;
+    }
+
+    #logPanel[hidden] {
+      display: none;
+    }
+
+    #logPanel .line {
+      margin: 0 0 2px;
+    }
+
+    #logPanel .line.error {
+      color: #ff8a8a;
+    }
+
+    webview {
+      flex: 1;
+      width: 100%;
+      border: none;
+    }
+
+    /* Bottom tool row, styled to match the viewer's toolbar (dark panel,
+       small uppercase mono labels, orange accent). Plain divs rather than
+       sp-action-button so UXP's Spectrum sizing doesn't override it. */
+    #toolsBar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px 0;
+      padding: 5px 6px;
+      background: #14181c;
+      border-top: 1px solid #262c31;
+      flex: none;
+      overflow: hidden;
+    }
+
+    .pgroup {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 0 8px;
+      border-right: 1px solid #262c31;
+    }
+
+    .pgroup:first-child {
+      padding-left: 2px;
+    }
+
+    .pgroup.noborder {
+      border-right: none;
+    }
+
+    .pgroup.last {
+      border-right: none;
+      margin-left: auto;
+      padding-right: 2px;
+    }
+
+    /* clear of Photoshop's panel resize grip in the bottom-right corner
+       (margin on the button itself; UXP ignored padding on its group) */
+    #exportExrBtn {
+      margin-right: 32px;
+    }
+
+    .pcap {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 9px;
+      letter-spacing: 1px;
+      color: #5d666d;
+      margin-right: 4px;
+    }
+
+    .pbtn {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      color: #8b949a;
+      padding: 5px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .pbtn:hover {
+      color: #e7e9ea;
+      background: #1b2025;
+    }
+
+    .pbtn.accent {
+      color: #ff8a3d;
+      background: rgba(255, 138, 61, 0.14);
+      border-color: rgba(255, 138, 61, 0.35);
+    }
+
+    .pbtn.accent:hover {
+      background: rgba(255, 138, 61, 0.24);
+    }
+
+    #toast {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: none;
+      padding: 7px 10px;
+      background: #1b2025;
+      border-top: 1px solid rgba(255, 138, 61, 0.35);
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 11px;
+      color: #e7e9ea;
+    }
+
+    #toast[hidden] {
+      display: none;
+    }
+
+    #toastText {
+      flex: 1;
+    }
+
+    .tlink {
+      color: #ff8a3d;
+      cursor: pointer;
+    }
+
+    .tlink:hover {
+      text-decoration: underline;
+    }
+
+    #toastClose {
+      color: #8b949a;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+
+    #exportDialog {
+      width: 440px;
+      background: #14181c;
+      color: #e7e9ea;
+    }
+
+    .ehead {
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .elabel {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 9px;
+      letter-spacing: 1px;
+      color: #8b949a;
+      margin: 12px 0 6px;
+    }
+
+    .estep {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      color: #c9cdd0;
+      margin-bottom: 5px;
+    }
+
+    .enum {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 10px;
+      color: #ff8a3d;
+      width: 18px;
+    }
+
+    #exportPath {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 11px;
+      color: #e7e9ea;
+      background: #0a0c0e;
+      border: 1px solid #262c31;
+      border-radius: 4px;
+      padding: 7px 8px;
+      word-break: break-all;
+      user-select: text;
+    }
+
+    .ename {
+      display: flex;
+      align-items: center;
+    }
+
+    .ename sp-textfield {
+      flex: 1;
+    }
+
+    .eext {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 11px;
+      color: #8b949a;
+      margin-left: 6px;
+    }
+
+    #exportNameReset {
+      margin-left: 8px;
+      letter-spacing: 0;
+    }
+
+    #exportNameReset[hidden] {
+      display: none;
+    }
+
+    #exportOverwrite {
+      font-size: 11px;
+      color: #ffb066;
+      margin-top: 6px;
+    }
+
+    #exportOverwrite[hidden] {
+      display: none;
+    }
+
+    .efoot {
+      display: flex;
+      align-items: center;
+      margin-top: 16px;
+    }
+
+    .efoot sp-checkbox {
+      flex: 1;
+    }
+
+    .efoot sp-button {
+      margin-left: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="logPanel" hidden></div>
+  <webview id="viewerWebview" src="plugin:/viewer/index.html"></webview>
+  <div id="toast" hidden>
+    <span id="toastText"></span>
+    <span class="tlink" id="toastOpen">Open folder</span>
+    <span id="toastClose" title="Dismiss">&#10005;</span>
+  </div>
+  <div id="toolsBar">
+    <div class="pgroup">
+      <span class="pcap">RANGE</span>
+      <div class="pbtn" id="rangeCompressBtn" title="Range compress the selected layer into a new layer">COMPRESS</div>
+      <div class="pbtn" id="rangeExpandBtn" title="Range expand the selected layer into a new layer">EXPAND</div>
+    </div>
+    <div class="pgroup">
+      <span class="pcap">ZENITH</span>
+      <div class="pbtn" id="getZenithBtn" title="Extract the zenith of the selected layer as a flat patch">GET</div>
+      <div class="pbtn" id="putZenithBtn" title="Reproject the selected patch layer back to equirect as a new layer">PUT</div>
+    </div>
+    <div class="pgroup">
+      <span class="pcap">NADIR</span>
+      <div class="pbtn" id="getNadirBtn" title="Extract the nadir of the selected layer as a flat patch">GET</div>
+      <div class="pbtn" id="putNadirBtn" title="Reproject the selected patch layer back to equirect as a new layer">PUT</div>
+    </div>
+    <div class="pgroup noborder">
+      <span class="pcap">SEAMS</span>
+      <div class="pbtn" id="fixSeamsBtn" title="Content-Aware Fill the wrap seam and the zenith (plus nadir on full equirects) of the selected layer into new layers">FIX</div>
+    </div>
+    <div class="pgroup last">
+      <div class="pbtn accent" id="exportExrBtn" title="Export 8192x4096 32-bit EXR to ../out/&lt;date&gt;/">EXPORT EXR</div>
+    </div>
+  </div>
+  <dialog id="exportDialog">
+    <div class="ehead">Export EXR</div>
+    <div class="elabel">STEPS</div>
+    <div id="exportSteps"></div>
+    <div class="elabel">OUTPUT NAME <span class="tlink" id="exportNameReset" hidden>reset to file name</span></div>
+    <div class="ename"><sp-textfield id="exportNameInput" placeholder="file name"></sp-textfield><span class="eext">.exr</span></div>
+    <div class="elabel">SAVES TO</div>
+    <div id="exportPath"></div>
+    <div id="exportOverwrite" hidden>A file with this name already exists and will be overwritten.</div>
+    <div class="efoot">
+      <sp-checkbox id="exportHideCheck">Don't show again for this document</sp-checkbox>
+      <sp-button id="exportCancelBtn" variant="secondary" quiet>Cancel</sp-button>
+      <sp-button id="exportOkBtn" variant="cta">Export</sp-button>
+    </div>
+  </dialog>
+  <dialog id="overwriteDialog">
+    <p id="overwriteMessage"></p>
+    <footer>
+      <sp-button id="overwriteCancelBtn" variant="secondary">Cancel</sp-button>
+      <sp-button id="overwriteOkBtn" variant="cta">Overwrite</sp-button>
+    </footer>
+  </dialog>
+</body>
+
+</html>

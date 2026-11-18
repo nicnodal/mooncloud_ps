@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mooncloud Review</title>
+<style>
+  :root{
+    --bg:#0a0c0e;
+    --panel:#14181c;
+    --panel-2:#1b2025;
+    --border:#262c31;
+    --text:#e7e9ea;
+    --text-dim:#8b949a;
+    --accent:#ff8a3d;
+    --accent-dim:rgba(255,138,61,0.18);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; width:100%; height:100%; background:var(--bg); overflow:hidden;
+    font-family: var(--mono); color:var(--text); -webkit-font-smoothing:antialiased; }
+  #app{ position:relative; width:100vw; height:100vh; }
+  #viewport{ display:block; width:100%; height:100%; cursor:grab; touch-action:none; }
+  #viewport.mode-draw, #viewport.mode-erase{ cursor:crosshair; }
+  #viewport.mode-annotate{ cursor:copy; }
+  #viewport.dragging{ cursor:grabbing; }
+
+  #hud{
+    position:absolute; top:16px; left:16px; pointer-events:none;
+    font-size:11px; letter-spacing:0.06em; color:var(--text-dim);
+    display:flex; flex-direction:column; gap:4px;
+  }
+  #hud .row{ display:flex; align-items:center; gap:8px; }
+  #hud .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 6px var(--accent); }
+  #hud .dot.syncing{ background:#4dabf7; box-shadow:0 0 6px #4dabf7; animation:pulse 1s infinite; }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.3; } }
+  #hud .modeLabel{ color:var(--text); font-weight:600; text-transform:uppercase; }
+  #hud .coords{ color:var(--text-dim); }
+
+  body.ui-hidden #hud, body.ui-hidden #toolbar, body.ui-hidden #pins-layer{ display:none; }
+
+  #pins-layer{ position:absolute; inset:0; pointer-events:none; }
+  .pin{ position:absolute; display:flex; align-items:center; gap:6px; transform:translate(-50%,-50%);
+    pointer-events:auto; }
+  .pin .dot{ width:9px; height:9px; border-radius:50%; background:var(--accent);
+    border:2px solid #0a0c0e; box-shadow:0 0 0 1px var(--accent); flex:none; cursor:pointer; }
+  .pin .label{ background:rgba(10,12,14,0.85); border:1px solid var(--border); padding:3px 7px;
+    font-size:11px; white-space:nowrap; border-radius:2px; display:flex; align-items:center; gap:6px; }
+  .pin .label button{ background:none; border:none; color:var(--text-dim); cursor:pointer;
+    font-family:var(--mono); font-size:11px; padding:0; line-height:1; }
+  .pin .label button:hover{ color:var(--accent); }
+
+  #toolbar{
+    position:absolute; bottom:clamp(8px,2vh,18px); left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    display:flex; align-items:stretch; flex-wrap:wrap; justify-content:center;
+    gap:2px; padding:clamp(2px,0.8vw,4px); box-shadow:0 8px 30px rgba(0,0,0,0.5);
+    width:max-content; max-width:calc(100vw - 16px);
+  }
+  .tgroup{ display:flex; align-items:center; gap:clamp(2px,0.5vw,3px);
+    padding:0 clamp(3px,1vw,6px); border-right:1px solid var(--border); }
+  .tgroup:last-child{ border-right:none; }
+  .tbtn{
+    background:transparent; border:1px solid transparent; color:var(--text-dim);
+    font-family:var(--mono); letter-spacing:0.04em; text-transform:uppercase;
+    padding:clamp(4px,1vw,6px) clamp(5px,1.2vw,7px); border-radius:4px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    min-width:clamp(24px,6vw,34px);
+  }
+  .tbtn svg{ width:clamp(13px,3vw,14px); height:clamp(13px,3vw,14px); stroke:currentColor; fill:none; stroke-width:1.6; }
+  .tbtn:hover{ color:var(--text); background:var(--panel-2); }
+  .tbtn.active{ color:var(--accent); background:var(--accent-dim); border-color:rgba(255,138,61,0.35); }
+  .tbtn kbd{ font-size:9px; color:var(--text-dim); opacity:0.7; }
+
+  input[type=color]{
+    -webkit-appearance:none; appearance:none; width:26px; height:26px; border:1px solid var(--border);
+    border-radius:50%; padding:0; background:none; cursor:pointer; overflow:hidden;
+  }
+  input[type=color]::-webkit-color-swatch-wrapper{ padding:0; }
+  input[type=color]::-webkit-color-swatch{ border:none; border-radius:50%; }
+
+  input[type=range]{ -webkit-appearance:none; width:clamp(46px,12vw,70px); height:2px; background:var(--border);
+    border-radius:2px; outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:11px; height:11px;
+    border-radius:50%; background:var(--accent); cursor:pointer; margin-top:-4.5px; }
+  .sizeLabel{ font-size:10px; color:var(--text-dim); width:22px; text-align:right; }
+
+  .iconlabel{ display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 8px; }
+
+  .tlabel{ font-size:clamp(8px,1.8vw,9px); color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; }
+
+  /* progressively drop non-essential toolbar chrome as the panel narrows,
+     so nothing gets clipped at the manifest's minimum panel width */
+  @media (max-width: 640px){
+    .tbtn kbd{ display:none; }
+  }
+  @media (max-width: 440px){
+    .tlabel{ display:none; }
+    .tbtn{ min-width:26px; }
+  }
+
+  #toast{
+    position:absolute; left:50%; bottom:calc(clamp(8px,2vh,18px) + 64px); z-index:30;
+    transform:translate(-50%, 8px); opacity:0; pointer-events:none;
+    transition:opacity .2s ease, transform .2s ease;
+    display:flex; align-items:center; gap:12px; max-width:calc(100vw - 24px);
+    background:var(--panel); border:1px solid rgba(255,138,61,0.35); border-left:3px solid var(--accent);
+    border-radius:6px; padding:9px 10px 9px 12px; box-shadow:0 8px 30px rgba(0,0,0,0.55);
+    font-size:11px; color:var(--text);
+  }
+  #toast.show{ opacity:1; transform:translate(-50%, 0); pointer-events:auto; }
+  #toast .tmsg{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #toast button{ background:none; border:none; font-family:var(--mono); font-size:11px; cursor:pointer; padding:0; }
+  #toast .topen{ color:var(--accent); white-space:nowrap; }
+  #toast .topen:hover{ text-decoration:underline; }
+  #toast .tclose{ color:var(--text-dim); }
+  #toast .tclose:hover{ color:var(--text); }
+
+  #labelModal{
+    position:absolute; background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    padding:8px; box-shadow:0 8px 24px rgba(0,0,0,0.6); display:flex; gap:6px; z-index:20;
+  }
+  #labelModal[hidden]{ display:none; }
+  #labelModal input{
+    background:var(--bg); border:1px solid var(--border); color:var(--text); font-family:var(--mono);
+    font-size:12px; padding:6px 8px; border-radius:4px; width:180px; outline:none;
+  }
+  #labelModal input:focus{ border-color:var(--accent); }
+  #labelModal button{
+    background:var(--accent); border:none; color:#0a0c0e; font-family:var(--mono); font-weight:700;
+    font-size:11px; text-transform:uppercase; padding:0 12px; border-radius:4px; cursor:pointer;
+  }
+  #labelModal button.cancel{ background:transparent; color:var(--text-dim); border:1px solid var(--border); }
+
+  .toolPopover{
+    position:absolute; bottom:calc(100% + 10px); left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    padding:12px 14px; box-shadow:0 8px 24px rgba(0,0,0,0.6);
+    display:flex; flex-direction:column; gap:9px; z-index:15;
+  }
+  .toolPopover[hidden]{ display:none; }
+  .toolPopover::after{
+    content:""; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+    border:6px solid transparent; border-top-color:var(--panel);
+  }
+  #fogPanel{ width:210px; }
+  #annotatePanel{ width:236px; }
+  #filePanel{ width:236px; }
+  .popoverRow{ display:flex; align-items:center; gap:8px; }
+  .popoverRow.buttons{ justify-content:center; gap:4px; }
+
+  .fogRow{ display:flex; align-items:center; gap:8px; }
+  .fogRow label{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text);
+    text-transform:uppercase; letter-spacing:0.04em; cursor:pointer; }
+  .fogRow input[type=checkbox]{ accent-color:var(--accent); width:13px; height:13px; cursor:pointer; }
+  .fogLabel{ font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;
+    width:66px; flex:none; }
+  .fogRow input[type=range]{ flex:1; width:auto; min-width:0; }
+  .fogVal{ font-size:10px; color:var(--text-dim); width:32px; text-align:right; flex:none; }
+  #fogPanel input[type=color]{ width:22px; height:22px; }
+
+  #displayPanel{ width:236px; }
+  .seg{ display:flex; flex:1; gap:2px; }
+  .seg .tbtn{ flex:1; flex-direction:row; justify-content:center; font-size:10px; min-width:0; }
+  #exposureReset{ font-size:10px; padding:2px 5px; min-width:0; }
+
+
+  #mcOverlay{
+    position:absolute; inset:0; background:rgba(0,0,0,0.6);
+    display:flex; align-items:center; justify-content:center; z-index:30;
+  }
+  #mcOverlay[hidden]{ display:none; }
+  #mcModal{
+    width:280px; background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    padding:14px; display:flex; flex-direction:column; gap:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,0.6);
+  }
+  .mcHeader{ display:flex; align-items:center; justify-content:space-between; font-size:12px;
+    font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--text); }
+  .mcHeader button{ background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:13px; }
+  .mcHeader button:hover{ color:var(--accent); }
+  .mcHint{ margin:0; font-size:11px; color:var(--text-dim); line-height:1.5; }
+  #mcModal input[type=text], #mcModal select, #mcModal textarea{
+    width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text);
+    font-family:var(--mono); font-size:12px; padding:7px 8px; border-radius:4px; outline:none;
+    resize:vertical;
+  }
+  #mcModal input[type=text]:focus, #mcModal select:focus, #mcModal textarea:focus{ border-color:var(--accent); }
+  .mcLabel{ font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; }
+  .mcPrimary{
+    background:var(--accent); border:none; color:#0a0c0e; font-family:var(--mono); font-weight:700;
+    font-size:11px; text-transform:uppercase; padding:9px; border-radius:4px; cursor:pointer;
+  }
+  .mcPrimary:disabled{ opacity:0.5; cursor:default; }
+  .mcRow{ display:flex; align-items:center; justify-content:space-between; font-size:11px; color:var(--text); }
+  .mcLink{ background:none; border:none; color:var(--text-dim); font-size:10px; cursor:pointer;
+    text-decoration:underline; }
+  .mcLink:hover{ color:var(--accent); }
+  .mcStatus{ font-size:10px; color:var(--text-dim); min-height:14px; line-height:1.5; }
+  .mcStatus.error{ color:#ff8a8a; }
+  .mcStatus.success{ color:#7ee787; }
+  .mcStatus a{ color:var(--accent); }
+
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="viewport"></canvas>
+
+  <div id="hud">
+    <div class="row"><span class="dot" id="syncDot"></span><span class="modeLabel" id="modeLabel">LOOK</span></div>
+    <div class="row coords" id="coordsLabel">lon 0.0&deg; &nbsp; lat 0.0&deg; &nbsp; fov 90&deg;</div>
+    <div class="row coords" id="displayLabel"></div>
+  </div>
+
+  <div id="pins-layer"></div>
+
+  <div id="toolbar">
+    <div class="tgroup">
+      <button class="tbtn" data-mode="look" title="Look (V)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4"/></svg><span class="tlabel">Look</span></button>
+    </div>
+    <div class="tgroup" id="annotateGroup" style="position:relative;">
+      <button class="tbtn" id="annotateBtn" title="Annotate tools"><svg viewBox="0 0 24 24"><path d="M4 20l3-1 11-11-2-2L5 17l-1 3z"/></svg><span class="tlabel">Annotate</span></button>
+      <div id="annotatePanel" class="toolPopover" hidden>
+        <div class="popoverRow buttons">
+          <button class="tbtn" data-mode="draw" title="Draw (D)"><svg viewBox="0 0 24 24"><path d="M4 20l3-1 11-11-2-2L5 17l-1 3z"/></svg><span class="tlabel">Draw</span><kbd>D</kbd></button>
+          <button class="tbtn" data-mode="erase" title="Erase (E)"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 8 8H7z"/><path d="M9 11l6-6 6 6-6 6"/></svg><span class="tlabel">Erase</span><kbd>E</kbd></button>
+          <button class="tbtn" data-mode="annotate" title="Pin (A)"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.2-6-10a6 6 0 0112 0c0 4.8-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg><span class="tlabel">Pin</span><kbd>A</kbd></button>
+        </div>
+        <div class="popoverRow">
+          <div class="iconlabel"><input type="color" id="colorPicker" value="#ff8a3d"><span class="tlabel">Color</span></div>
+          <div class="iconlabel">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="range" id="sizeSlider" min="2" max="60" value="8">
+              <span class="sizeLabel" id="sizeLabel">8</span>
+            </div>
+            <span class="tlabel">Brush</span>
+          </div>
+        </div>
+        <div class="popoverRow buttons">
+          <button class="tbtn" id="undoBtn" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5"/><path d="M4 12h11a5 5 0 010 10h-1"/></svg><span class="tlabel">Undo</span></button>
+          <button class="tbtn" id="clearDrawBtn" title="Clear drawing"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg><span class="tlabel">Clear</span></button>
+          <button class="tbtn" id="clearPinsBtn" title="Clear pins"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.2-6-10a6 6 0 0112 0c0 4.8-6 10-6 10z"/><path d="M9 8l6 6M15 8l-6 6"/></svg><span class="tlabel">Pins</span></button>
+        </div>
+        <div class="popoverRow buttons">
+          <button class="tbtn" id="pushLayerBtn" title="Send drawing to Photoshop as a new layer"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg><span class="tlabel">To PS Layer</span></button>
+        </div>
+      </div>
+    </div>
+    <div class="tgroup" id="fogGroup" style="position:relative;">
+      <button class="tbtn" id="fogBtn" title="Fog settings"><svg viewBox="0 0 24 24"><path d="M4 10h9a4 4 0 100-1.8"/><path d="M2 14h14a3.5 3.5 0 110 3.2"/><path d="M2 18h11"/></svg><span class="tlabel">Fog</span></button>
+      <div id="fogPanel" class="toolPopover" hidden>
+        <div class="fogRow">
+          <label><input type="checkbox" id="fogEnabled"> Enabled</label>
+        </div>
+        <div class="fogRow">
+          <span class="fogLabel">Density</span>
+          <input type="range" id="fogDensity" min="0" max="2" step="0.01" value="0.4">
+          <span class="fogVal" id="fogDensityVal">0.40</span>
+        </div>
+        <div class="fogRow">
+          <span class="fogLabel">Half-height</span>
+          <input type="range" id="fogHalfHeight" min="2" max="300" step="1" value="60">
+          <span class="fogVal" id="fogHalfHeightVal">60</span>
+        </div>
+        <div class="fogRow">
+          <span class="fogLabel">Falloff</span>
+          <input type="range" id="fogFalloff" min="0" max="5" step="0.05" value="1">
+          <span class="fogVal" id="fogFalloffVal">1.00</span>
+        </div>
+        <div class="fogRow">
+          <span class="fogLabel">Base height</span>
+          <input type="range" id="fogBaseHeight" min="-200" max="200" step="1" value="0">
+          <span class="fogVal" id="fogBaseHeightVal">0</span>
+        </div>
+        <div class="fogRow">
+          <span class="fogLabel">Color</span>
+          <input type="color" id="fogColor" value="#b7c2cb">
+        </div>
+      </div>
+    </div>
+    <div class="tgroup" id="displayGroup" style="position:relative;">
+      <button class="tbtn" id="displayBtn" title="Preview resolution, colour and exposure"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span class="tlabel">Display</span></button>
+      <div id="displayPanel" class="toolPopover" hidden>
+        <div class="fogRow">
+          <span class="fogLabel">Resolution</span>
+          <div class="seg" id="resolutionSeg">
+            <button class="tbtn" data-value="2k" title="2048x1024">2K</button>
+            <button class="tbtn" data-value="4k" title="4096x2048">4K</button>
+            <button class="tbtn" data-value="8k" title="8192x4096">8K</button>
+            <button class="tbtn" data-value="full" title="The document's own resolution">Full</button>
+          </div>
+        </div>
+        <div class="fogRow">
+          <span class="fogLabel">Color</span>
+          <div class="seg" id="colorSeg">
+            <button class="tbtn" data-value="srgb" title="Linear to sRGB display transform">sRGB</button>
+            <button class="tbtn" data-value="raw" title="Raw values, no transform">Raw</button>
+          </div>
+        </div>
+        <div class="fogRow">
+          <span class="fogLabel">Exposure</span>
+          <input type="range" id="exposureSlider" min="-10" max="10" step="0.1" value="0" title="Double-click to reset">
+          <span class="fogVal" id="exposureVal">+0.0</span>
+          <button class="tbtn" id="exposureReset" title="Reset exposure to 0">0</button>
+        </div>
+      </div>
+    </div>
+    <div class="tgroup">
+      <button class="tbtn" id="refreshBtn" title="Refresh from Photoshop (R)"><svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg><span class="tlabel">Refresh</span></button>
+      <button class="tbtn" id="liveBtn" title="Live mode: auto-refresh on every Photoshop edit"><svg viewBox="0 0 24 24"><path d="M4.93 19.07a10 10 0 010-14.14"/><path d="M7.76 16.24a6 6 0 010-8.49"/><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg><span class="tlabel">Live</span></button>
+      <button class="tbtn" id="halfBtn" title="Half equirect: map the image to the upper hemisphere only"><svg viewBox="0 0 24 24"><path d="M3 14a9 9 0 0118 0z"/><path d="M3 14h18"/></svg><span class="tlabel">Half</span></button>
+    </div>
+    <div class="tgroup">
+      <button class="tbtn" id="mooncloudBtn" title="Upload to Mooncloud Review"><svg viewBox="0 0 24 24"><path d="M16 16l-4-4-4 4"/><path d="M12 12v9"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg><span class="tlabel">Mooncloud</span></button>
+    </div>
+    <div class="tgroup" id="fileGroup" style="position:relative;">
+      <button class="tbtn" id="fileBtn" title="File tools"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg><span class="tlabel">File</span></button>
+      <div id="filePanel" class="toolPopover" hidden>
+        <div class="popoverRow buttons">
+          <button class="tbtn" id="loadBtn" title="Load panorama from disk"><svg viewBox="0 0 24 24"><path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/><path d="M7 9l5-5 5 5"/><path d="M12 4v13"/></svg><span class="tlabel">Load</span></button>
+          <button class="tbtn" id="snapBtn" title="Snap screenshot of current view"><svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13.5" r="3.2"/></svg><span class="tlabel">Snap</span></button>
+          <button class="tbtn" id="exportPngBtn" title="Export PNG"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 13l3 3 5-6"/></svg><span class="tlabel">PNG</span></button>
+          <button class="tbtn" id="exportJsonBtn" title="Export annotations JSON"><svg viewBox="0 0 24 24"><path d="M6 3h9l5 5v13H6z"/><path d="M15 3v5h5"/></svg><span class="tlabel">JSON</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" role="status"><span class="tmsg" id="toastMsg"></span><button class="topen" id="toastOpen">Open folder</button><button class="tclose" id="toastClose" title="Dismiss">&#10005;</button></div>
+  <input type="file" id="fileInput" accept="image/*" hidden>
+  <div id="labelModal" hidden>
+    <input type="text" id="labelInput" placeholder="Annotation text&hellip;" maxlength="140">
+    <button id="labelSave">Save</button>
+    <button class="cancel" id="labelCancel">Esc</button>
+  </div>
+
+  <div id="mcOverlay" hidden>
+    <div id="mcModal">
+      <div class="mcHeader">
+        <span>Mooncloud Review</span>
+        <button id="mcCloseBtn" title="Close">&#10005;</button>
+      </div>
+
+      <div id="mcConnectState">
+        <p class="mcHint">Paste your Mooncloud API key (issued by a studio admin, Admin &rarr; API).</p>
+        <input type="text" id="mcApiKeyInput" placeholder="mcr_..." autocomplete="off" spellcheck="false">
+        <button id="mcConnectBtn" class="mcPrimary">Connect</button>
+        <div id="mcConnectStatus" class="mcStatus"></div>
+      </div>
+
+      <div id="mcPublishState" hidden>
+        <div class="mcRow">
+          <span id="mcIdentity"></span>
+          <button id="mcDisconnectBtn" class="mcLink">Disconnect</button>
+        </div>
+        <label class="mcLabel" for="mcProjectSelect">Project</label>
+        <select id="mcProjectSelect"></select>
+        <label class="mcLabel" for="mcAssetSelect">Asset</label>
+        <select id="mcAssetSelect"></select>
+        <label class="mcLabel" for="mcNotesInput">Notes</label>
+        <textarea id="mcNotesInput" rows="3" placeholder="Optional notes for this version&hellip;"></textarea>
+        <button id="mcPublishBtn" class="mcPrimary">Publish current preview</button>
+        <div id="mcPublishStatus" class="mcStatus"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
