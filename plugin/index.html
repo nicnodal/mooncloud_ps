@@ -4,6 +4,8 @@
 <head>
   <script src="plugin/index.js"></script>
   <script src="plugin/seams.js"></script>
+  <script src="plugin/skylayout.js"></script>
+  <script src="plugin/skydome.js"></script>
   <style>
     body {
       margin: 0;
@@ -259,6 +261,83 @@
     .efoot sp-button {
       margin-left: 8px;
     }
+
+    /* Convert to Sky Dome dialog */
+    #skyDomeDialog {
+      width: 460px;
+      background: #14181c;
+      color: #e7e9ea;
+    }
+
+    #sdSource,
+    #sdOutName {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 11px;
+      color: #e7e9ea;
+      background: #0a0c0e;
+      border: 1px solid #262c31;
+      border-radius: 4px;
+      padding: 7px 8px;
+      word-break: break-all;
+      user-select: text;
+    }
+
+    .sdrow {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .sdopt {
+      font-family: Consolas, ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      color: #8b949a;
+      padding: 5px 9px;
+      border: 1px solid #262c31;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .sdopt:hover {
+      color: #e7e9ea;
+      background: #1b2025;
+    }
+
+    .sdopt.on {
+      color: #ff8a3d;
+      background: rgba(255, 138, 61, 0.14);
+      border-color: rgba(255, 138, 61, 0.35);
+    }
+
+    .sdhint {
+      font-size: 11px;
+      color: #8b949a;
+      margin-left: 6px;
+    }
+
+    .sdfield {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .sdfield .sdflabel {
+      font-size: 12px;
+      color: #c9cdd0;
+      width: 150px;
+    }
+
+    .sdfield sp-textfield {
+      width: 80px;
+    }
+
+    #sdAdvanced[hidden],
+    #sdFrameOpts[hidden],
+    #sdDiscOpts[hidden] {
+      display: none;
+    }
   </style>
 </head>
 
@@ -286,9 +365,13 @@
       <div class="pbtn" id="getNadirBtn" title="Extract the nadir of the selected layer as a flat patch">GET</div>
       <div class="pbtn" id="putNadirBtn" title="Reproject the selected patch layer back to equirect as a new layer">PUT</div>
     </div>
-    <div class="pgroup noborder">
+    <div class="pgroup">
       <span class="pcap">SEAMS</span>
       <div class="pbtn" id="fixSeamsBtn" title="Content-Aware Fill the wrap seam and the zenith (plus nadir on full equirects) of the selected layer into new layers">FIX</div>
+    </div>
+    <div class="pgroup noborder">
+      <span class="pcap">DOME</span>
+      <div class="pbtn" id="skyDomeBtn" title="Convert the equirect into a new square sky-dome texture (Frame or Disc layout); the source document isn't changed">CONVERT</div>
     </div>
     <div class="pgroup last">
       <div class="pbtn accent" id="exportExrBtn" title="Export 8192x4096 32-bit EXR to ../out/&lt;date&gt;/">EXPORT EXR</div>
@@ -307,6 +390,49 @@
       <sp-checkbox id="exportHideCheck">Don't show again for this document</sp-checkbox>
       <sp-button id="exportCancelBtn" variant="secondary" quiet>Cancel</sp-button>
       <sp-button id="exportOkBtn" variant="cta">Export</sp-button>
+    </div>
+  </dialog>
+  <dialog id="skyDomeDialog">
+    <div class="ehead">Convert to Sky Dome</div>
+    <div class="elabel">SOURCE (visible layers, not modified)</div>
+    <div id="sdSource"></div>
+    <div class="elabel">LAYOUT</div>
+    <div class="sdrow" id="sdLayout">
+      <div class="sdopt" data-value="frame">FRAME</div>
+      <div class="sdopt" data-value="disc">DISC</div>
+      <span class="sdhint">Frame: 4 horizon strips + cap, most detail at the horizon</span>
+    </div>
+    <div class="elabel">SIZE</div>
+    <div class="sdrow" id="sdSize">
+      <div class="sdopt" data-value="2048">2048</div>
+      <div class="sdopt" data-value="4096">4096</div>
+      <div class="sdopt" data-value="8192">8192</div>
+    </div>
+    <div class="elabel">ORIENTATION</div>
+    <div class="sdfield"><span class="sdflabel">Yaw (azimuth at image centre)</span><sp-textfield id="sdYaw" type="number"></sp-textfield><span class="sdhint">deg, 0 = North</span></div>
+    <div class="elabel">ADVANCED <span class="tlink" id="sdAdvancedToggle">show advanced</span> &#183; <span class="tlink" id="sdReset">reset to defaults</span></div>
+    <div id="sdAdvanced" hidden>
+      <div id="sdFrameOpts">
+        <div class="sdfield"><span class="sdflabel">Horizon band</span><sp-textfield id="sdBand" type="number"></sp-textfield><span class="sdhint">deg, must match the dome mesh</span></div>
+      </div>
+      <div id="sdDiscOpts">
+        <div class="sdfield"><span class="sdflabel">Skirt below horizon</span><sp-textfield id="sdSkirt" type="number"></sp-textfield><span class="sdhint">deg, must match the dome mesh</span></div>
+        <div class="sdfield"><span class="sdflabel">Corners</span>
+          <div class="sdrow" id="sdCorners">
+            <div class="sdopt" data-value="extend">EXTEND</div>
+            <div class="sdopt" data-value="black">BLACK</div>
+            <div class="sdopt" data-value="transparent">TRANSPARENT</div>
+          </div>
+        </div>
+      </div>
+      <div class="sdfield"><span class="sdflabel">Min samples per axis</span><sp-textfield id="sdSamples" type="number"></sp-textfield><span class="sdhint">default 3</span></div>
+    </div>
+    <div class="elabel">NEW DOCUMENT</div>
+    <div id="sdOutName"></div>
+    <div class="efoot">
+      <span style="flex: 1"></span>
+      <sp-button id="sdCancelBtn" variant="secondary" quiet>Cancel</sp-button>
+      <sp-button id="sdOkBtn" variant="cta">Convert</sp-button>
     </div>
   </dialog>
   <dialog id="overwriteDialog">
