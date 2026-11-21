@@ -111,7 +111,9 @@
     const skirt = o.skirtDeg ?? 0;
     const g = layout === "frame" ? frameGeometry(N, o.bandDeg ?? 10) : null;
     // RGBA when the source has alpha or the disc corners are cut out to transparent
-    const outComponents = C === 4 || corners === "transparent" ? 4 : 3;
+    // o.ignoreAlpha: treat a 4-channel source as opaque (its alpha is skipped)
+    const useAlpha = C === 4 && !o.ignoreAlpha;
+    const outComponents = useAlpha || corners === "transparent" ? 4 : 3;
 
     // ---- x-only rip-map (each level halves the width, wrapping)
     const levels = [{ w: width, d: src }];
@@ -211,7 +213,7 @@
             }
           }
           // a source without alpha counts as alpha 1 wherever it was sampled
-          const alpha = C === 4 ? acc[3] : cover;
+          const alpha = useAlpha ? acc[3] : cover;
           const q = ((row - row0) * N + col) * OC;
           if (corners === "extend") {
             out[q] = acc[0]; out[q + 1] = acc[1]; out[q + 2] = acc[2];

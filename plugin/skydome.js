@@ -11,7 +11,7 @@
   const { app, imaging, core, action, constants } = require("photoshop");
   const SL = globalThis.SkyLayout;
 
-  const SKYDOME_BUILD = "2026-11-21 skydome-v2.1 putPixels-replace-false";
+  const SKYDOME_BUILD = "2026-11-21 skydome-v2.2 rgb-write + diagnostics";
   const SETTINGS_KEY = "mooncloud.skyDome.v1";
   const DEFAULTS = { layout: "frame", size: 4096, yawDeg: 0, bandDeg: 10, minSamples: 3, skirtDeg: 0, corners: "extend" };
   const SIZES = [2048, 4096, 8192];
@@ -282,6 +282,26 @@
     return { data, components: comps };
   }
 
+  // min / mean / max per channel over a strided sample, for the log
+  function channelStats(data, comps) {
+    const n = data.length / comps, step = Math.max(1, Math.floor(n / 200000));
+    const lo = [], hi = [], sum = [];
+    for (let c = 0; c < comps; c++) { lo[c] = Infinity; hi[c] = -Infinity; sum[c] = 0; }
+    let count = 0, bad = 0;
+    for (let i = 0; i < n; i += step) {
+      for (let c = 0; c < comps; c++) {
+        const v = data[i * comps + c];
+        if (!Number.isFinite(v)) { bad++; continue; }
+        if (v < lo[c]) lo[c] = v;
+        if (v > hi[c]) hi[c] = v;
+        sum[c] += v;
+      }
+      count++;
+    }
+    const f = (v) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toPrecision(3));
+    return "RGBA".slice(0, comps).split("").map((ch, c) => `${ch} ${f(lo[c])}/${f(sum[c] / count)}/${f(hi[c])}`).join(", ") + (bad ? `, ${bad} non-finite` : "");
+  }
+
   // Converts rendered linear floats to the output document's depth.
   function encodeBand(floats, depth, comps) {
     if (depth === 32) return floats;
@@ -340,8 +360,13 @@
         const conv = SL.createConverter(source.data, src.width, src.rows, source.components, {
           layout: opts.layout, size: opts.size, elTop: src.elTop, elBottom: src.elBottom,
           yawDeg: opts.yawDeg, bandDeg: opts.bandDeg, skirtDeg: opts.skirtDeg,
-          minSamples: opts.minSamples, corners: opts.corners
+          minSamples: opts.minSamples, corners: opts.corners,
+          // Sky only: write RGB like the EXR export does. A composite's alpha
+          // isn't needed and a 4-channel write is one more thing that can go
+          // transparent; the disc's transparent corners still get alpha.
+          ignoreAlpha: true
         });
+        log(`sky dome: source ${src.width}x${src.rows}, ${source.components} channels read, stats ${channelStats(source.data, source.components)}; writing ${conv.outComponents} channels`);
         times.prepare = Date.now() - t;
 
         // 3. new document, then render band by band (15-100%)
@@ -391,6 +416,7 @@
           const r1 = Math.min(N, r0 + WRITE_BAND_ROWS);
           const view = floats.subarray(0, (r1 - r0) * N * OC);
           conv.renderRows(r0, r1, view);
+          if (r0 === 0 || r1 === N) log(`sky dome: rows ${r0}-${r1} rendered, stats ${channelStats(view, OC)}`);
           const tp = Date.now();
           const buf = encodeBand(view, src.depth, OC);
           if (full) full.set(buf, r0 * N * OC);
@@ -415,6 +441,18 @@
           putMs += Date.now() - tp;
         }
         full = null;
+        // read back the middle row of the result, to show in the log what landed
+        try {
+          const rb = await imaging.getPixels({
+            documentID: outDoc.id, layerID: outLayer.id,
+            sourceBounds: { left: 0, top: N >> 1, right: N, bottom: (N >> 1) + 1 }, componentSize: 32
+          });
+          const rd = await rb.imageData.getData();
+          log(`sky dome: read back middle row: ${rb.imageData.components} channels, stats ${channelStats(rd, rb.imageData.components)}`);
+          if (typeof rb.imageData.dispose === "function") rb.imageData.dispose();
+        } catch (err) {
+          log("sky dome: couldn't read back the result: " + describeError(err), true);
+        }
         times.render = Date.now() - t - putMs;
         times.write = putMs;
       } catch (err) {
