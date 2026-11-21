@@ -13,7 +13,7 @@ function run(depth, W, H, half, settings) {
   const ps = {
     constants: { BitsPerChannelType: { EIGHT: 8, SIXTEEN: 16, THIRTYTWO: 32 }, DocumentMode: { RGB: "RGB" } },
     app: {
-      documents: { get length() { return docs.length; }, add: async (o) => { const d = { id: docs.length + 1, ...o, layers: [{ id: 99, name: "Layer 1" }], closeWithoutSaving: async () => {} }; docs.push(d); written.doc = d; return d; } },
+      documents: { get length() { return docs.length; }, add: async (o) => { const d = { id: docs.length + 1, ...o, layers: [{ id: 99, name: "Layer 1", bounds: { top: 0, left: 0, right: o.width, bottom: o.height } }], closeWithoutSaving: async () => {} }; docs.push(d); written.doc = d; return d; } },
       activeDocument: src,
       showAlert: async (t) => { throw new Error("alert: " + t); }
     },

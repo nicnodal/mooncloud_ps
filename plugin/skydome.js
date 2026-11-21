@@ -11,7 +11,7 @@
   const { app, imaging, core, action, constants } = require("photoshop");
   const SL = globalThis.SkyLayout;
 
-  const SKYDOME_BUILD = "2026-11-21 skydome-v2";
+  const SKYDOME_BUILD = "2026-11-21 skydome-v2.1 putPixels-replace-false";
   const SETTINGS_KEY = "mooncloud.skyDome.v1";
   const DEFAULTS = { layout: "frame", size: 4096, yawDeg: 0, bandDeg: 10, minSamples: 3, skirtDeg: 0, corners: "extend" };
   const SIZES = [2048, 4096, 8192];
@@ -360,6 +360,30 @@
         }
         const N = opts.size, OC = conv.outComponents;
         const floats = new Float32Array(WRITE_BAND_ROWS * N * OC);
+        // The whole result is also kept (in the output's own type) so it can
+        // be written in one go if Photoshop drops the earlier bands: putPixels
+        // replaces the layer's whole content by default, which left only the
+        // last band in Nic's first test. replace: false is the band fix.
+        let full = null;
+        try {
+          full = src.depth === 32 ? new Float32Array(N * N * OC)
+            : src.depth === 16 ? new Uint16Array(N * N * OC) : new Uint8Array(N * N * OC);
+        } catch (err) {
+          log(`sky dome: no memory for a full-size copy (${N}x${N}), writing bands only`, true);
+        }
+        const putBuffer = async (buf, top, rows, replace) => {
+          const imgData = await imaging.createImageDataFromBuffer(buf, {
+            width: N, height: rows, components: OC, componentSize: src.depth, colorSpace: "RGB"
+          });
+          try {
+            await imaging.putPixels({
+              documentID: outDoc.id, layerID: outLayer.id, imageData: imgData,
+              targetBounds: { left: 0, top }, replace
+            });
+          } finally {
+            if (typeof imgData.dispose === "function") imgData.dispose();
+          }
+        };
         t = Date.now();
         let putMs = 0;
         for (let r0 = 0; r0 < N; r0 += WRITE_BAND_ROWS) {
@@ -369,14 +393,28 @@
           conv.renderRows(r0, r1, view);
           const tp = Date.now();
           const buf = encodeBand(view, src.depth, OC);
-          const imgData = await imaging.createImageDataFromBuffer(buf, {
-            width: N, height: r1 - r0, components: OC, componentSize: src.depth, colorSpace: "RGB"
-          });
-          await imaging.putPixels({ documentID: outDoc.id, layerID: outLayer.id, imageData: imgData, targetBounds: { left: 0, top: r0 } });
-          if (typeof imgData.dispose === "function") imgData.dispose();
+          if (full) full.set(buf, r0 * N * OC);
+          await putBuffer(buf, r0, r1 - r0, false);
           putMs += Date.now() - tp;
           report(0.15 + 0.85 * (r1 / N), `${opts.layout} ${N}`);
         }
+        // Check the bands all landed: the layer must span the full height.
+        let bounds = null;
+        try {
+          const lb = outLayer.bounds;
+          bounds = { top: Math.round(lb.top), bottom: Math.round(lb.bottom), left: Math.round(lb.left), right: Math.round(lb.right) };
+        } catch (err) {
+          bounds = null;
+        }
+        log(`sky dome: layer bounds after band writes ${bounds ? JSON.stringify(bounds) : "unknown"}`);
+        if (bounds && (bounds.top > 1 || bounds.bottom < N - 1)) {
+          if (!full) throw new Error(`only rows ${bounds.top}-${bounds.bottom} of ${N} were written and there's no memory to retry`);
+          log("sky dome: Photoshop kept only part of the bands, writing the whole image in one go", true);
+          const tp = Date.now();
+          await putBuffer(full, 0, N, true);
+          putMs += Date.now() - tp;
+        }
+        full = null;
         times.render = Date.now() - t - putMs;
         times.write = putMs;
       } catch (err) {
