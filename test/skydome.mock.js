@@ -39,10 +39,10 @@ function run(depth, W, H, half, settings) {
     action: { batchPlay: async () => [] }
   };
   const logs = [];
-  const store = settings ? { "mooncloud.skyDome.v1": JSON.stringify(settings) } : {};
+  const store = settings ? { file: JSON.stringify(settings) } : {};
   let clickHandler = null;
   const ctx = {
-    require: (m) => { if (m === "photoshop") return ps; throw new Error(m); },
+    require: (m) => { if (m === "photoshop") return ps; if (m === "uxp") return { storage: { localFileSystem: { getDataFolder: async () => ({ getEntry: async () => { if (!store.file) throw new Error("none"); return { read: async () => store.file }; }, createFile: async () => ({ write: async (t) => { store.file = t; } }) }) } } }; throw new Error(m); },
     log: (m, e) => logs.push((e ? "ERR " : "") + m),
     describeError: (e) => (e && e.message) || String(e),
     showToast: (m) => logs.push("toast: " + m),

@@ -19,20 +19,38 @@
   const WRITE_BAND_ROWS = 64; // output rows rendered per putPixels
   const U16_ONE = 32768; // Photoshop's 16-bit white
 
-  // ---- remembered settings (plugin-wide, last used)
-  function loadSettings() {
+  // ---- remembered settings (plugin-wide, last used). Stored in the
+  // plugin's data folder (localStorage isn't reliable in UXP), with
+  // localStorage as a fallback.
+  const SETTINGS_FILE = "skydome-settings.json";
+  async function loadSettings() {
+    let s = null;
     try {
-      const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-      return { ...DEFAULTS, ...s };
+      const folder = await require("uxp").storage.localFileSystem.getDataFolder();
+      const entry = await folder.getEntry(SETTINGS_FILE);
+      s = JSON.parse(await entry.read());
     } catch (err) {
-      return { ...DEFAULTS };
+      try {
+        s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
+      } catch (e) {
+        s = null;
+      }
     }
+    return { ...DEFAULTS, ...(s && typeof s === "object" ? s : {}) };
   }
-  function saveSettings(s) {
+  async function saveSettings(s) {
+    try {
+      const folder = await require("uxp").storage.localFileSystem.getDataFolder();
+      const file = await folder.createFile(SETTINGS_FILE, { overwrite: true });
+      await file.write(JSON.stringify(s));
+      return;
+    } catch (err) {
+      log("sky dome: couldn't save settings to the data folder: " + describeError(err), true);
+    }
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     } catch (err) {
-      log("sky dome: couldn't save settings: " + describeError(err), true);
+      // nothing else to try
     }
   }
 
@@ -104,7 +122,7 @@
 
   async function showSkyDomeDialog(src) {
     const dlg = document.getElementById("skyDomeDialog");
-    const s = loadSettings();
+    const s = await loadSettings();
     if (!dlg || typeof dlg.uxpShowModal !== "function") return s;
 
     document.getElementById("sdSource").textContent =
@@ -165,7 +183,7 @@
       corners: ["extend", "black", "transparent"].includes(readToggle("sdCorners")) ? readToggle("sdCorners") : "extend"
     };
     if (!SIZES.includes(out.size)) out.size = DEFAULTS.size;
-    saveSettings(out);
+    await saveSettings(out);
     return out;
   }
 
